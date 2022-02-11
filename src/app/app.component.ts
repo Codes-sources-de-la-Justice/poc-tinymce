@@ -2,14 +2,14 @@ import { Component, VERSION } from '@angular/core';
 import PSPDFKit from 'pspdfkit';
 
 const curTab = {
-  uri: "/assets/dummy.pdf",
+  uri: "assets/dummy.pdf",
   title: "PDF 01"
 };
 
 const allTabs = {
-  "/assets/dummy.pdf": {
+  "assets/dummy.pdf": {
     title: "PDF 01",
-    uri: "/assets/dummy.pdf"
+    uri: "assets/dummy.pdf"
   }
 };
 
@@ -20,7 +20,7 @@ type Tab = {
 
 function loadPDF(uri, toolbarItems) {
     return PSPDFKit.load({
-      baseUrl: location.protocol + "//" + location.host + "/assets/",
+      baseUrl: document.baseURI + "assets/",
       container: '#container',
       document: uri,
       styleSheets: ['/assets/styles.css'],
