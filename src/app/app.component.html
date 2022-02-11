@@ -1,3 +1,12 @@
 <h1>Etude TinyMCE</h1>
+<div class="outer-container">
 <editor [init]="tinymceOptions"></editor>
-<div id="container" style="width: 100vw; height: 100vh;"></div>
+<div class="tabbed-reader">
+  <nav>
+    <ul *ngFor="let openTab of tabService.openTabs">
+      <li><a href="#">{{ openTab.title }}</a></li>
+    </ul>
+  </nav>
+<div id="container"></div>
+</div>
+</div>
