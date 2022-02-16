@@ -1,0 +1,19 @@
+{
+  "/ngsw*": {
+    "target": "http://localhost:4200/",
+    "secure": false,
+    "logLevel": "debug"
+  },
+  "/manifest.webmanifest": {
+    "target": "http://localhost:4200",
+    "secure": false
+  },
+  "/worker-basic.min.js": {
+    "target": "http://localhost:4200",
+    "secure": false
+  },
+  "/safety-worker.js": {
+    "target": "http://localhost:4200",
+    "secure": false
+  }
+}

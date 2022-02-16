@@ -1,19 +1,18 @@
 import { Component, VERSION } from '@angular/core';
 import PSPDFKit from 'pspdfkit';
 
-const curTab = {
-  uri: "assets/dummy.pdf",
-  title: "PDF 01"
-};
-
 const allTabs = {
   "assets/dummy.pdf": {
     title: "PDF 01",
     uri: "assets/dummy.pdf"
+  },
+  "assets/sample.pdf": {
+    title: "PDF 02",
+    uri: "assets/sample.pdf"
   }
 };
 
-const initialTabs = [ curTab ];
+const initialTabs = [ allTabs["assets/dummy.pdf"], allTabs["assets/sample.pdf"] ];
 type Tab = {
   uri: string;
 };
@@ -58,6 +57,10 @@ class TabService {
     return this.activeInstance.viewState.currentPageIndex;
   }
 
+  linkToTab(tab) {
+    this.insertLinkToEditor(this.getLinkFor({ tab }));
+  }
+
   linkToCurrentDocument() {
     this.insertLinkToEditor(this.getLinkFor({ tab: this.getCurrentTab() }));
   }
@@ -86,6 +89,7 @@ class TabService {
   openNewTab(tab) {
     this.openTabs.push(tab);
     this.activeTab = this.openTabs.length - 1;
+    // 
     return this.reloadPDF();
   }
 
@@ -169,9 +173,13 @@ export class AppComponent {
       'searchreplace visualblocks code fullscreen',
       'insertdatetime media table paste code help wordcount',
     ],
-    toolbar: `customLinkButton`,
+    toolbar: `customLinkButton openDocumentsMenu copyEverything`,
     //base_url: '/tinymce', // Root for resources
     //suffix: '.min', // Suffix to use when loading resources
+  };
+
+  public focusTab = tabIndex => {
+    this.tabService.focusTab(tabIndex)
   };
 
   ngAfterViewInit() {
@@ -192,6 +200,36 @@ export class AppComponent {
         position: 'selection',
         scope: 'node',
       });
+
+      editor.ui.registry.addMenuButton('openDocumentsMenu', {
+        icon: 'link',
+        text: 'Documents ouverts',
+        fetch: function (callback) {
+          callback(that.tabService.openTabs.map(tab => ({
+            type: "menuitem",
+            text: `${tab.title}`,
+            onAction: function () {
+              that.tabService.linkToTab(tab);
+            }
+          })));
+        }
+      });
+
+      editor.ui.registry.addButton('copyEverything', {
+        icon: 'copy',
+        text: 'Copier toute la note',
+        onAction: () => {
+          const contents = editor.getContent();
+          navigator.clipboard.writeText(contents).then(
+            () => {
+              console.log("Copied!");
+            }
+          ).catch(err => {
+            console.log(err);
+          });
+        }
+      });
+
 
       // Bouton de la toolbar.
       editor.ui.registry.addButton('customLinkButton', {

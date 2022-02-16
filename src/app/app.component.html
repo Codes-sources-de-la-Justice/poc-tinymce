@@ -3,8 +3,8 @@
 <editor [init]="tinymceOptions"></editor>
 <div class="tabbed-reader">
   <nav>
-    <ul *ngFor="let openTab of tabService.openTabs">
-      <li><a href="#">{{ openTab.title }}</a></li>
+    <ul *ngFor="let openTab of tabService.openTabs; let index = index">
+      <li (click)="focusTab(index)"><a href="#">{{ openTab.title }}</a></li>
     </ul>
   </nav>
 <div id="container"></div>
