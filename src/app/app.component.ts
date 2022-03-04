@@ -1,5 +1,102 @@
 import { Component, VERSION } from '@angular/core';
 import PSPDFKit from 'pspdfkit';
+import { Dexie, liveQuery } from 'dexie';
+import 'dexie-observable';
+import 'dexie-syncable';
+import { applyEncryptionMiddleware, UNENCRYPTED_LIST, NON_INDEXED_FIELDS } from 'dexie-encrypted';
+import lunr from 'lunr';
+require('lunr-languages/lunr.stemmer.support')(lunr);
+require('lunr-languages/lunr.fr')(lunr);
+
+// Register websocket protocol
+import './websocket-sync-protocol.js';
+// Load WebSocket shim
+//import './websocketserver-shim.js';
+// Load WebSocket server
+//import '../websocket-server.js';
+
+// TODO: online-offline connectivity indicator.
+// when online back, connect to WebSocket to perform sync
+// when offline, cut the connection
+
+const symmetricKey = new Uint8Array(Array(32).fill(0)); // Null key.
+
+/*applyEncryptionMiddleware(db, symmetricKey, {
+  pdfs: NON_INDEXED_FIELDS,
+  instantJson: UNENCRYPTED_LIST
+});*/
+
+interface IPDF {
+  oid?: string;
+  filename: string;
+  title: string;
+  instantJSON: any;
+  blob: Blob;
+}
+
+
+class AppDB extends Dexie {
+  pdfs!: Dexie.Table<IPDF, string>;
+
+  constructor() {
+    super("AppDB");
+
+    this.version(1).stores({
+      pdfs: "$$oid,&filename,title,instantJSON"
+    });
+  }
+}
+
+const db = new AppDB();
+(window as any).db = db;
+
+async function blobFromUri(uri) {
+  const resp = await fetch(uri);
+  return resp.blob();
+}
+
+function startSync() {
+  db.syncable.connect("websocket", "ws://127.0.0.1:8000");
+  db.syncable.on('statusChanged', function (newStatus, url) {
+    console.log("Sync status changed: " + Dexie.Syncable.StatusTexts[newStatus]);
+  });
+}
+
+async function seed() {
+  await db.pdfs.clear();
+  await db.pdfs.bulkAdd([
+    { filename: "assets/dummy.pdf", title: "Dummy PDF", blob: await blobFromUri("assets/dummy.pdf"), instantJSON: null },
+    { filename: "assets/sample.pdf", title: "Sample PDF", blob: await blobFromUri("assets/sample.pdf"), instantJSON: null }
+  ]);
+  return true;
+}
+
+async function isStoragePersisted() {
+  return await navigator.storage && navigator.storage.persisted &&
+    navigator.storage.persisted();
+}
+
+async function showEstimatedQuota() {
+  if (navigator.storage && navigator.storage.estimate) {
+    const estimation = await navigator.storage.estimate();
+    console.log(`Quota: ${estimation.quota/(1024*1024*1024)} GB`);
+    console.log(`Usage: ${estimation.usage/(1024*1024*1024)} GB`);
+  } else {
+    console.error("StorageManager not found");
+  }
+}
+
+async function persist() {
+  const persisted = await navigator.storage.persisted();
+  const permission = await navigator.permissions.query({name: "persistent-storage"});
+  if (!persisted && permission.state == "granted") {
+    return navigator.storage.persist();
+  } else if (!persisted && permission.state == "prompt") {
+    console.log('prompt persist');
+    return navigator.storage.persist();
+  }
+}
+
 
 const allTabs = {
   "assets/dummy.pdf": {
@@ -12,31 +109,35 @@ const allTabs = {
   }
 };
 
-const initialTabs = [ allTabs["assets/dummy.pdf"], allTabs["assets/sample.pdf"] ];
 type Tab = {
   uri: string;
 };
 
-function loadPDF(uri, toolbarItems) {
-    return PSPDFKit.load({
-      baseUrl: document.baseURI + "assets/",
-      container: '#container',
-      document: uri,
-      styleSheets: ['/assets/styles.css'],
-      toolbarItems,
-    }).then((instance) => {
-      console.log('PSPDFKit loaded!');
-      (window as any).instance = instance;
-      return instance;
-    });
+async function loadPDF(uri, toolbarItems) {
+  const { instantJSON, blob } = await db.pdfs.get(uri);
+  const docBlobObjectURL = URL.createObjectURL(blob);
+  const instance = await PSPDFKit.load({
+    baseUrl: document.baseURI + "assets/",
+    container: '#container',
+    document: docBlobObjectURL,
+    styleSheets: ['/assets/styles.css'],
+    toolbarItems,
+    instantJSON,
+    autoSaveMode: PSPDFKit.AutoSaveMode.IMMEDIATE,
+  });
+
+  URL.revokeObjectURL(docBlobObjectURL);
+  (window as any).instance = instance;
+
+  return instance;
 }
 
 class TabService {
   activeEditor = null;
   activeInstance = null;
   activeTab = 0;
-  openTabs = initialTabs;
-  toolbarItems = [];
+  openTabs = [];
+  toolbarItems = [...PSPDFKit.defaultToolbarItems];
 
   constructor() {
     const linkCurrentPageToolbarItem = {
@@ -47,6 +148,13 @@ class TabService {
     };
 
     this.toolbarItems.push(linkCurrentPageToolbarItem);
+  }
+
+  async onPDFChanges() {
+    const oid = this.openTabs[this.activeTab].uri;
+    await db.pdfs.update(oid, {
+      instantJSON: await this.activeInstance.exportInstantJSON()
+    });
   }
 
   getCurrentTab() {
@@ -69,13 +177,23 @@ class TabService {
     this.insertLinkToEditor(this.getLinkFor({ tab: this.getCurrentTab(), page: this.getCurrentPage() }));
   }
 
-  reloadPDF() {
+  async reloadPDF() {
+    // No active tab.
+    if (this.activeTab >= this.openTabs.length) {
+      return;
+    }
+
     const { uri } = this.getCurrentTab();
     if (this.activeInstance) {
       PSPDFKit.unload(this.activeInstance);
     }
-    return loadPDF(uri, this.toolbarItems).then(instance => {
-      this.activeInstance = instance;
+    this.activeInstance = await loadPDF(uri, this.toolbarItems);
+    this.setupEventListenersOnInstance(this.activeInstance);
+  }
+
+  setupEventListenersOnInstance(instance) {
+    ["annotations.didSave", "bookmarks.didSave"].forEach(evt => {
+      instance.addEventListener(evt, () => this.onPDFChanges());
     });
   }
 
@@ -89,7 +207,6 @@ class TabService {
   openNewTab(tab) {
     this.openTabs.push(tab);
     this.activeTab = this.openTabs.length - 1;
-    // 
     return this.reloadPDF();
   }
 
@@ -125,6 +242,7 @@ class TabService {
     if (tabId != null) {
       p = this.focusTab(tabId);
     } else {
+      // TODO: fix it using Dexie
       p = this.openNewTab(allTabs[uri]);
     }
 
@@ -183,7 +301,28 @@ export class AppComponent {
   };
 
   ngAfterViewInit() {
-    this.tabService.reloadPDF();
+    persist().then(() => {
+      console.log('Persistence layer enabled.');
+      return db.pdfs.count();
+    }).then(count => {
+      return Promise.resolve(count === 0 ? seed() : false);
+    }).then(seeded => {
+      if (seeded) {
+        console.log('Seeding done.');
+      } else {
+        console.log('Already seeded.');
+      }
+      return showEstimatedQuota();
+    }).then(() => {
+      console.log('DB ready.');
+      return db.pdfs.toArray();
+    }).then(pdfs => {
+      this.tabService.openTabs = pdfs.map(({oid, title}) => ({
+        title,
+        uri: oid
+      }));
+      this.tabService.reloadPDF();
+    });
 
     const that = this;
 
