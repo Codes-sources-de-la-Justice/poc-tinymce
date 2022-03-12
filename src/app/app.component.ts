@@ -8,6 +8,15 @@ import lunr from 'lunr';
 require('lunr-languages/lunr.stemmer.support')(lunr);
 require('lunr-languages/lunr.fr')(lunr);
 
+// TODO in order:
+// 1. online-offline indicator
+// 2. index text from PDFs using lunr.js & pspdfkit
+// 3. search bar
+// 4. restore reactivity on tabs using liveQuery on openTabs
+// 5. fix the look of internal links
+// 6. perform sync with websocketserver, figure out CORS stuff and host it on Scaleway MJ.
+// 7. show how many tabs of the app are opened currentlyp
+
 // Register websocket protocol
 import './websocket-sync-protocol.js';
 // Load WebSocket shim
@@ -62,12 +71,30 @@ function startSync() {
   });
 }
 
+async function mkPdfRecord(filename, title): Promise<IPDF> {
+  return {
+    filename,
+    title,
+    blob: await blobFromUri(filename),
+    instantJSON: null
+  }
+}
+
 async function seed() {
   await db.pdfs.clear();
-  await db.pdfs.bulkAdd([
-    { filename: "assets/dummy.pdf", title: "Dummy PDF", blob: await blobFromUri("assets/dummy.pdf"), instantJSON: null },
-    { filename: "assets/sample.pdf", title: "Sample PDF", blob: await blobFromUri("assets/sample.pdf"), instantJSON: null }
-  ]);
+  await db.pdfs.bulkAdd(
+      await Promise.all([
+        ["dummy", "Dummy"],
+        ["sample", "Sample"],
+        ["independence", "Indépendance de la Justice"],
+        ["justice_01", "C'est quoi la Justice ?"],
+        ["justice_de_paix", "Justice de Paix"],
+        ["justice_qualite", "Qualité de la Justice"],
+        ["numerisation", "Numérisation de la Justice"]
+      ].map(([filename, title]) => mkPdfRecord(`assets/${filename}.pdf`, title)))
+  );
+  // TODO: extract text from all pdf using pspdfkit
+  // index them
   return true;
 }
 
@@ -97,17 +124,6 @@ async function persist() {
   }
 }
 
-
-const allTabs = {
-  "assets/dummy.pdf": {
-    title: "PDF 01",
-    uri: "assets/dummy.pdf"
-  },
-  "assets/sample.pdf": {
-    title: "PDF 02",
-    uri: "assets/sample.pdf"
-  }
-};
 
 type Tab = {
   uri: string;
@@ -242,8 +258,8 @@ class TabService {
     if (tabId != null) {
       p = this.focusTab(tabId);
     } else {
-      // TODO: fix it using Dexie
-      p = this.openNewTab(allTabs[uri]);
+      console.error('BUG');
+      //p = getPdfByUri(uri).then(record => this.openNewTab(record));
     }
 
     if (page != null) {
@@ -282,6 +298,7 @@ class TabService {
 })
 export class AppComponent {
   name = 'Angular ' + VERSION.major;
+  connected = true;
   tabService = new TabService();
   tinymceOptions = {
     height: 500,
@@ -300,7 +317,14 @@ export class AppComponent {
     this.tabService.focusTab(tabIndex)
   };
 
+  public resetDB = async () => {
+    return seed();
+  };
+
   ngAfterViewInit() {
+    window.addEventListener('online', () => { this.connected = true; });
+    window.addEventListener('offline', () => { this.connected = false; });
+
     persist().then(() => {
       console.log('Persistence layer enabled.');
       return db.pdfs.count();

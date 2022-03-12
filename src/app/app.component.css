@@ -18,3 +18,13 @@ editor {
 .tabbed-reader {
   width: 100%;
 }
+
+.active {
+  border-color: blue;
+}
+
+.tabbed-reader li {
+  display: inline-block;
+  padding: 5px;
+  border: 1px solid #000;
+}
