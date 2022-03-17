@@ -1,6 +1,14 @@
 <h1>Etude TinyMCE</h1>
 <div>État de connexion: {{ connected ? "En ligne" : "Hors-ligne" }}</div>
 <button (click)="resetDB()">Réinitialiser la base de donnée</button>
+<input type="text" (change)="performSearch" />
+<div class="search-results">
+  <ul>
+    <li *ngFor="let searchResult of searchResults">
+      {{ searchResult.title }}
+    </li>
+  </ul>
+</div>
 <div class="outer-container">
 <editor [init]="tinymceOptions"></editor>
 <div class="tabbed-reader">

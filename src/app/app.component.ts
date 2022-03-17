@@ -19,10 +19,6 @@ require('lunr-languages/lunr.fr')(lunr);
 
 // Register websocket protocol
 import './websocket-sync-protocol.js';
-// Load WebSocket shim
-//import './websocketserver-shim.js';
-// Load WebSocket server
-//import '../websocket-server.js';
 
 // TODO: online-offline connectivity indicator.
 // when online back, connect to WebSocket to perform sync
@@ -65,7 +61,7 @@ async function blobFromUri(uri) {
 }
 
 function startSync() {
-  db.syncable.connect("websocket", "ws://127.0.0.1:8000");
+  db.syncable.connect("websocket", "ws://poc.j.lahfa.fr:80");
   db.syncable.on('statusChanged', function (newStatus, url) {
     console.log("Sync status changed: " + Dexie.Syncable.StatusTexts[newStatus]);
   });
@@ -204,7 +200,9 @@ class TabService {
       PSPDFKit.unload(this.activeInstance);
     }
     this.activeInstance = await loadPDF(uri, this.toolbarItems);
+    console.log('instance ready', this.activeInstance)
     this.setupEventListenersOnInstance(this.activeInstance);
+
   }
 
   setupEventListenersOnInstance(instance) {
@@ -291,6 +289,40 @@ class TabService {
   }
 }
 
+async function indexPDFs(tabService) {
+    const pdfs = await db.pdfs.toArray();
+    const documents = [];
+
+    for (let [index, {oid, title}] of pdfs.entries()) {
+      tabService.activeTab = index;
+      await tabService.reloadPDF();
+      console.log('extracting text from ', oid, title, tabService.activeInstance);
+      const n = tabService.activeInstance.totalPageCount;
+      const text = [];
+      for (let i = 0 ; i < 1 ; i++) {
+        const textLines = await tabService.activeInstance.textLinesForPageIndex(i);
+        documents.push({id: `${oid}-${i}`, title, text: textLines.map(lines => lines.contents.toString()).join('\n'), pageIndex: i});
+      }
+    }
+
+    console.log('building indexer...');
+    const indexer = lunr(function () {
+      this.ref('id');
+      this.field('title');
+      this.field('text');
+      this.metadataWhitelist = ['position'];
+
+      documents.forEach(function (doc) {
+        this.add(doc);
+      }, this);
+    });
+
+    console.log(documents);
+    console.log('indexer done');
+
+    return indexer;
+}
+
 @Component({
   selector: 'my-app',
   templateUrl: './app.component.html',
@@ -299,6 +331,9 @@ class TabService {
 export class AppComponent {
   name = 'Angular ' + VERSION.major;
   connected = true;
+  searchInput = "";
+  searchResults = [];
+  indexer = null;
   tabService = new TabService();
   tinymceOptions = {
     height: 500,
@@ -319,6 +354,10 @@ export class AppComponent {
 
   public resetDB = async () => {
     return seed();
+  };
+
+  public performSearch = evt => {
+    console.log(this.indexer.search(evt.target.value));
   };
 
   ngAfterViewInit() {
@@ -345,7 +384,12 @@ export class AppComponent {
         title,
         uri: oid
       }));
-      this.tabService.reloadPDF();
+      return this.tabService.reloadPDF();
+    }).then(() => {
+      return indexPDFs(this.tabService);
+    }).then(indexer => {
+      (window as any).indexer = indexer;
+      this.indexer = indexer;
     });
 
     const that = this;
