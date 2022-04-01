@@ -22,11 +22,16 @@
             "main": "src/main.ts",
             "polyfills": "src/polyfills.ts",
             "tsConfig": "tsconfig.json",
-            "assets": ["src/favicon.ico", "src/assets", { "glob": "**/*", "input": "./node_modules/pspdfkit/dist/pspdfkit-lib", "output": "./assets/pspdfkit-lib/" }, "src/manifest.webmanifest", "src/manifest.webmanifest"],
+            "assets": ["src/favicon.ico", "src/assets",
+              { "glob": "**/*", "input": "./node_modules/pspdfkit/dist/pspdfkit-lib", "output": "./assets/pspdfkit-lib/" },
+             { "glob": "**/*", "input": "node_modules/tinymce", "output": "/tinymce/" },
+              "src/manifest.webmanifest", "src/manifest.webmanifest"],
             "styles": [
               "src/styles.css"
             ],
-            "scripts": [],
+            "scripts": [
+              "node_modules/tinymce/tinymce.min.js"
+            ],
             "serviceWorker": true,
             "ngswConfigPath": "ngsw-config.json"
           },
