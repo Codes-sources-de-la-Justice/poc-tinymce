@@ -1,0 +1,12 @@
+<label for="search">Recherche: </label>
+<input id="search" type="text" [formControl]="searchInput" />
+<div class="search-results">
+  <ul>
+    <li *ngFor="let searchResult of searchResults">
+      <a href="#" (click)="onClick(searchResult)">
+        {{ searchResult.title }} / {{ searchResult.page }} - {{ searchResult.score }}
+      </a>
+      <small>{{searchResult.text}}</small>
+    </li>
+  </ul>
+</div>
