@@ -5,22 +5,17 @@ import 'dexie-observable';
 import 'dexie-syncable';
 import { applyEncryptionMiddleware, UNENCRYPTED_LIST, NON_INDEXED_FIELDS } from 'dexie-encrypted';
 import lunr from 'lunr';
+import SyncClient from 'sync-client';
 require('lunr-languages/lunr.stemmer.support')(lunr);
 require('lunr-languages/lunr.fr')(lunr);
 
 // TODO in order:
-// 1. online-offline indicator
-// 2. index text from PDFs using lunr.js & pspdfkit
-// 3. search bar
 // 4. restore reactivity on tabs using liveQuery on openTabs
 // 5. fix the look of internal links
-// 6. perform sync with websocketserver, figure out CORS stuff and host it on Scaleway MJ.
-// 7. show how many tabs of the app are opened currentlyp
+// 6. show how many tabs of the app are opened currentlyp
+// 7. perform indexation in background with hidden instance.
 
-// Register websocket protocol
-import './websocket-sync-protocol.js';
-
-// TODO: online-offline connectivity indicator.
+// TODO:
 // when online back, connect to WebSocket to perform sync
 // when offline, cut the connection
 
@@ -39,32 +34,58 @@ interface IPDF {
   blob: Blob;
 }
 
-
-class AppDB extends Dexie {
-  pdfs!: Dexie.Table<IPDF, string>;
-
-  constructor() {
-    super("AppDB");
-
-    this.version(1).stores({
-      pdfs: "$$oid,&filename,title,instantJSON"
-    });
-  }
+interface IText {
+  oid?: string;
+  pdfOid: string;
+  text: string;
+  page: number;
+  boundingBox: number[];
 }
 
-const db = new AppDB();
+const dbVersions = [
+  {
+    version: 1,
+    stores: {
+      pdfs: "$$oid,&filename,title,instantJSON,blob",
+      texts: "$$oid,pdfOid,text,page,*boundingBox"
+    }
+  }
+];
+
+const SYNC_URL = 'http://poc.j.lahfa.fr:3000';
+const db = new SyncClient('EtudeDB', dbVersions);
 (window as any).db = db;
+
+function bbToArray(bbox) {
+  return [bbox.left, bbox.top, bbox.width, bbox.height];
+}
+
+function arrayToRect(bboxArray) {
+  return new PSPDFKit.Geometry.Rect({
+    left: bboxArray[0],
+    top: bboxArray[1],
+    width: bboxArray[2],
+    height: bboxArray[3]
+  });
+}
 
 async function blobFromUri(uri) {
   const resp = await fetch(uri);
   return resp.blob();
 }
 
-function startSync() {
-  db.syncable.connect("websocket", "ws://poc.j.lahfa.fr:80");
-  db.syncable.on('statusChanged', function (newStatus, url) {
-    console.log("Sync status changed: " + Dexie.Syncable.StatusTexts[newStatus]);
+async function startSync(connected) {
+  db.statusChange(SYNC_URL, function (newStatus) {
+    console.log(`Sync status changed (from ${SYNC_URL}): ${newStatus}`);
   });
+
+  if (connected) {
+    try {
+      await db.connect(SYNC_URL);
+    } catch (e) {
+      console.error('Tried to connect, but failed', e);
+    }
+  }
 }
 
 async function mkPdfRecord(filename, title): Promise<IPDF> {
@@ -128,20 +149,27 @@ type Tab = {
 async function loadPDF(uri, toolbarItems) {
   const { instantJSON, blob } = await db.pdfs.get(uri);
   const docBlobObjectURL = URL.createObjectURL(blob);
-  const instance = await PSPDFKit.load({
-    baseUrl: document.baseURI + "assets/",
-    container: '#container',
-    document: docBlobObjectURL,
-    styleSheets: ['/assets/styles.css'],
-    toolbarItems,
-    instantJSON,
-    autoSaveMode: PSPDFKit.AutoSaveMode.IMMEDIATE,
-  });
+  const baseUrl = document.baseURI[document.baseURI.length - 1] === '#' ? document.baseURI.slice(0, -1) : document.baseURI;
+  console.log('baseUrl', baseUrl)
+  try {
+    const instance = await PSPDFKit.load({
+      baseUrl: `${baseUrl}assets/`,
+      container: '#container',
+      document: docBlobObjectURL,
+      styleSheets: ['/assets/styles.css'],
+      toolbarItems,
+      instantJSON,
+      enableServiceWorkerSupport: true,
+      autoSaveMode: PSPDFKit.AutoSaveMode.IMMEDIATE,
+    });
 
-  URL.revokeObjectURL(docBlobObjectURL);
-  (window as any).instance = instance;
-
-  return instance;
+    (window as any).instance = instance;
+    return instance;
+  } catch (e) {
+    console.error('Failure during PDF loading', e);
+  } finally {
+    URL.revokeObjectURL(docBlobObjectURL);
+  }
 }
 
 class TabService {
@@ -242,6 +270,11 @@ class TabService {
     this.activeInstance.setViewState(state => state.set("currentPageIndex", pageIndex));
   }
 
+  openOrFocusTab(uri) {
+    const tabId = this.locateExistingTab(uri);
+    return this.focusTab(tabId);
+  }
+
   openInternalLink(link) {
     let page = null;
     let uri;
@@ -291,23 +324,72 @@ class TabService {
 
 async function indexPDFs(tabService) {
     const pdfs = await db.pdfs.toArray();
-    const documents = [];
 
+    // Do not re-extract if we already have every IDs we want.
+    console.log('indexing PDFs...')
+    const allIndexed: IText[][] = await Promise.all(pdfs.map(({oid}) => db.texts.where({pdfOid: oid}).toArray()));
+    const indexedOids = new Set(allIndexed.filter(indexed => indexed.length > 0).map(indexed => indexed[0].pdfOid));
+    const documents = allIndexed.filter(indexed => indexed.length > 0).flatMap(pages => {
+      const pdf = pdfs.find(pdf => pdf.oid === pages[0].pdfOid);
+      return pages.map(({oid, pdfOid, text, page, boundingBox}) => ({
+        oid,
+        pdfOid,
+        title: pdf.title,
+        pageIndex: page,
+        text,
+        boundingBox
+      }));
+    });
+
+    console.log('initializing with', documents.length, 'in database');
+    console.time('Extracting text for the remaining PDFs');
     for (let [index, {oid, title}] of pdfs.entries()) {
+      if (indexedOids.has(oid)) {
+        console.log(`${oid}: already indexed.`)
+        continue;
+      }
+
       tabService.activeTab = index;
       await tabService.reloadPDF();
-      console.log('extracting text from ', oid, title, tabService.activeInstance);
+      const label = `Extracting text from ${oid}/${title}/${tabService.activeInstance}`;
+      console.time(label);
       const n = tabService.activeInstance.totalPageCount;
       const text = [];
-      for (let i = 0 ; i < 1 ; i++) {
+      for (let i = 0 ; i < n ; i++) {
         const textLines = await tabService.activeInstance.textLinesForPageIndex(i);
-        documents.push({id: `${oid}-${i}`, title, text: textLines.map(lines => lines.contents.toString()).join('\n'), pageIndex: i});
+        textLines.forEach(lines => {
+          documents.push({oid: null, pdfOid: oid, title, text: lines.contents.toString(), pageIndex: i, boundingBox: bbToArray(lines.boundingBox)});
+        });
       }
+      console.timeEnd(label);
     }
+    console.timeEnd('Extracting text for the remaining PDFs');
 
-    console.log('building indexer...');
+    tabService.activeTab = 0;
+    await tabService.reloadPDF();
+
+    console.time('Bulk-putting the documents in the DB')
+    await db.texts.bulkPut(
+      documents.map(({oid, pdfOid, text, pageIndex, boundingBox}) => {
+        const doc = {
+          pdfOid,
+          page: pageIndex,
+          text,
+          boundingBox
+        };
+
+        if (oid) {
+          doc['oid'] = oid;
+        }
+
+        return doc;
+      })
+    );
+    console.timeEnd('Bulk-putting the documents in the DB')
+
+    console.time('Building the indexer...');
     const indexer = lunr(function () {
-      this.ref('id');
+      this.ref('oid');
       this.field('title');
       this.field('text');
       this.metadataWhitelist = ['position'];
@@ -316,9 +398,10 @@ async function indexPDFs(tabService) {
         this.add(doc);
       }, this);
     });
+    console.timeEnd('Building the indexer...');
+    console.log('Indexer built.')
 
     console.log(documents);
-    console.log('indexer done');
 
     return indexer;
 }
@@ -356,16 +439,50 @@ export class AppComponent {
     return seed();
   };
 
-  public performSearch = evt => {
-    console.log(this.indexer.search(evt.target.value));
+  public performSearch (value) {
+    console.time(`search ${value}`)
+    Promise.all(this.indexer.search(value).map(async (searchResult) => {
+      const indexRecord = await db.texts.get(searchResult.ref);
+      const pdf = await db.pdfs.get(indexRecord.pdfOid);
+
+      // compute chunks of texts using matchData.
+
+      return {
+        title: pdf.title,
+        pdfOid: pdf.oid,
+        page: indexRecord.page,
+        text: indexRecord.text,
+        boundingBox: indexRecord.boundingBox,
+        ...searchResult
+      };
+    })).then(searchResults => {
+      console.timeEnd(`search ${value}`)
+      console.log(searchResults);
+      this.searchResults = searchResults
+    });
   };
 
+  public jumpToPDFAndRect = async (id, pageIndex, rect) => {
+    await this.tabService.openOrFocusTab(id);
+    const pspdfkitRect = arrayToRect(rect);
+    await this.tabService.activeInstance.jumpToRect(pageIndex, pspdfkitRect);
+    /*const annotation = new PSPDFKit.Annotations.HighlightAnnotation({
+        pageIndex: pageIndex,
+        rects: [pspdfkitRect] as any,
+        boundingBox: PSPDFKit.Geometry.Rect.union([pspdfkitRect] as any)
+    });
+    await this.tabService.activeInstance.create([annotation]);*/
+  }
+
   ngAfterViewInit() {
-    window.addEventListener('online', () => { this.connected = true; });
+    window.addEventListener('online', () => { this.connected = true; db.connect(SYNC_URL); });
     window.addEventListener('offline', () => { this.connected = false; });
 
     persist().then(() => {
       console.log('Persistence layer enabled.');
+      return startSync(this.connected);
+    }).then(() => {
+      console.log('Synchronization started.');
       return db.pdfs.count();
     }).then(count => {
       return Promise.resolve(count === 0 ? seed() : false);
@@ -375,6 +492,7 @@ export class AppComponent {
       } else {
         console.log('Already seeded.');
       }
+
       return showEstimatedQuota();
     }).then(() => {
       console.log('DB ready.');

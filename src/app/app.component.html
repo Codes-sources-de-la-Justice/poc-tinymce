@@ -1,24 +1,18 @@
 <h1>Etude TinyMCE</h1>
 <div>État de connexion: {{ connected ? "En ligne" : "Hors-ligne" }}</div>
 <button (click)="resetDB()">Réinitialiser la base de donnée</button>
-<input type="text" (change)="performSearch" />
-<div class="search-results">
-  <ul>
-    <li *ngFor="let searchResult of searchResults">
-      {{ searchResult.title }}
-    </li>
-  </ul>
-</div>
 <div class="outer-container">
-<editor [init]="tinymceOptions"></editor>
-<div class="tabbed-reader">
-  <nav>
-    <ul>
-      <li *ngFor="let openTab of tabService.openTabs; let index = index" (click)="focusTab(index)">
-        <a href="#">{{ openTab.title }}</a>
-      </li>
-    </ul>
-  </nav>
-<div id="container"></div>
+  <editor [init]="tinymceOptions"></editor>
+  <div class="tabbed-reader">
+    <nav>
+      <ul>
+        <li *ngFor="let openTab of tabService.openTabs; let index = index" (click)="focusTab(index)">
+          <a href="#">{{ openTab.title }}</a>
+        </li>
+      </ul>
+    </nav>
+  <div id="container"></div>
+  </div>
 </div>
-</div>
+<h3>Chercher du texte</h3>
+<search-bar (onSearch)="performSearch($event)" [searchResults]="searchResults" [onClickResult]="jumpToPDFAndRect" [ready]="indexer !== null"></search-bar>
