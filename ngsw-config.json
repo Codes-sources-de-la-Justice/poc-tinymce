@@ -12,7 +12,11 @@
           "/manifest.webmanifest",
           "/*.css",
           "/*.js",
-          "assets/pspdfkit-lib/*"
+          "/assets/pspdfkit-lib/*",
+          "/assets/pspdfkit-lib/*.css",
+          "/assets/styles.css",
+          "/tinymce/**",
+          "/tinymce/**.css"
         ]
       }
     },
