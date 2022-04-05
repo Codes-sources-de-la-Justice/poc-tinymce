@@ -9,6 +9,8 @@ import SyncClient from 'sync-client';
 require('lunr-languages/lunr.stemmer.support')(lunr);
 require('lunr-languages/lunr.fr')(lunr);
 
+const baseUrl = document.baseURI[document.baseURI.length - 1] === '#' ? document.baseURI.slice(0, -1) : document.baseURI;
+
 // TODO in order:
 // 4. restore reactivity on tabs using liveQuery on openTabs
 // 5. fix the look of internal links
@@ -149,7 +151,6 @@ type Tab = {
 async function loadPDF(uri, toolbarItems) {
   const { instantJSON, blob } = await db.pdfs.get(uri);
   const docBlobObjectURL = URL.createObjectURL(blob);
-  const baseUrl = document.baseURI[document.baseURI.length - 1] === '#' ? document.baseURI.slice(0, -1) : document.baseURI;
   console.log('baseUrl', baseUrl)
   try {
     const instance = await PSPDFKit.load({
@@ -443,6 +444,10 @@ export class AppComponent {
     console.time(`search ${value}`)
     Promise.all(this.indexer.search(value).map(async (searchResult) => {
       const indexRecord = await db.texts.get(searchResult.ref);
+      if (!indexRecord) {
+        return null;
+      }
+
       const pdf = await db.pdfs.get(indexRecord.pdfOid);
 
       // compute chunks of texts using matchData.
@@ -458,7 +463,7 @@ export class AppComponent {
     })).then(searchResults => {
       console.timeEnd(`search ${value}`)
       console.log(searchResults);
-      this.searchResults = searchResults
+      this.searchResults = searchResults.filter(searchResult => searchResult != null);
     });
   };
 
