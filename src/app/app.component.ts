@@ -52,7 +52,7 @@ const dbVersions = [
   }
 ];
 
-const SYNC_URL = 'http://poc.j.lahfa.fr:3000';
+const SYNC_URL = 'https://poc.j.lahfa.fr';
 const db = new SyncClient('EtudeDB', dbVersions);
 (window as any).db = db;
 
@@ -156,7 +156,7 @@ async function loadPDF(uri, toolbarItems) {
       baseUrl: `${baseUrl}assets/`,
       container: '#container',
       document: docBlobObjectURL,
-      styleSheets: ['/assets/styles.css'],
+      styleSheets: [`${baseUrl}assets/styles.css`],
       toolbarItems,
       instantJSON,
       enableServiceWorkerSupport: true,
@@ -427,7 +427,7 @@ export class AppComponent {
       'insertdatetime media table paste code help wordcount',
     ],
     toolbar: `customLinkButton openDocumentsMenu copyEverything`,
-    base_url: '/tinymce', // Root for resources
+    base_url: `${baseUrl}tinymce`, // Root for resources
     suffix: '.min', // Suffix to use when loading resources
   };
 
