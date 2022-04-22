@@ -344,8 +344,8 @@ export class AppComponent {
       'insertdatetime media table paste code help wordcount',
     ],
     toolbar: `customLinkButton openDocumentsMenu copyEverything`,
-    //base_url: '/tinymce', // Root for resources
-    //suffix: '.min', // Suffix to use when loading resources
+    base_url: 'poc-tinymce/tinymce', // Root for resources
+    suffix: '.min', // Suffix to use when loading resources
   };
 
   public focusTab = tabIndex => {
@@ -356,8 +356,9 @@ export class AppComponent {
     return seed();
   };
 
-  public performSearch = evt => {
-    console.log(this.indexer.search(evt.target.value));
+  public performSearch = () => {
+    console.log('performSearch')
+    //console.log(this.indexer.search(evt.target.value));
   };
 
   ngAfterViewInit() {
