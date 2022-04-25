@@ -17,6 +17,87 @@ require('lunr-languages/lunr.fr')(lunr);
 // 6. perform sync with websocketserver, figure out CORS stuff and host it on Scaleway MJ.
 // 7. show how many tabs of the app are opened currentlyp
 
+
+var delta = function(v1, v2) {
+
+    // return NULL when passed references to
+    // the same objects or matching scalar values
+    if (v1 === v2) {
+        return null;
+    }
+    var cloneIt = function(v) {
+        if (v == null || typeof v != 'object') {
+            return v;
+        }
+
+        var isArray = Array.isArray(v);
+
+        var obj = isArray ? [] : {};
+        if (!isArray) {
+            // handles function, etc
+            Object.assign({}, v);
+        }
+
+        for (var i in v) {
+            obj[i] = cloneIt(v[i]);
+        }
+
+        return obj;
+    }
+
+    // different types or array compared to non-array
+    if (typeof v1 != typeof v2 || Array.isArray(v1) != Array.isArray(v2)) {
+        return [cloneIt(v1), cloneIt(v2)];
+    }
+
+    // different scalars (no cloning needed)
+    if (typeof v1 != 'object' && v1 !== v2) {
+        return [v1, v2];
+    }
+
+    // one is null, the other isn't
+    // (if they were both null, the '===' comparison
+    // above would not have allowed us here)
+    if (v1 == null || v2 == null) {
+        return [cloneIt(v1), cloneIt(v2)]; 
+    }
+
+    // We have two objects or two arrays to compare.
+    var isArray = Array.isArray(v1);
+
+    var left = isArray ? [] : {};
+    var right = isArray ? [] : {};
+
+    for (var i in v1) {
+        if (!v2.hasOwnProperty(i)) {
+            left[i] = cloneIt(v1[i]);
+        } else {
+            var sub_diff = delta(v1[i], v2[i]);
+            // copy the differences between the 
+            // two objects into the results.
+            // - If the object is array, use 'null'
+            //   to indicate the two corresponding elements
+            //   match.
+            //
+            // - If the object is not an array, copy only
+            //   the members that point to an unmatched
+            //   object.
+            if (isArray || sub_diff) { 
+                left[i] = sub_diff ? cloneIt(sub_diff[0]) : null;
+                right[i] = sub_diff ? cloneIt(sub_diff[1]) : null;
+            }
+        }
+    }
+
+    for (var i in v2) {
+        if (!v1.hasOwnProperty(i)) {
+            right[i] = cloneIt(v2[i]);
+        }
+    }
+
+    return [ left, right];
+};
+
 // Register websocket protocol
 import './websocket-sync-protocol.js';
 
@@ -164,9 +245,20 @@ class TabService {
 
   async onPDFChanges() {
     const oid = this.openTabs[this.activeTab].uri;
+    let instantJSON = await this.activeInstance.exportInstantJSON();
+
+    if (instantJSON.hasOwnProperty('pdfId') && instantJSON.pdfId == null) {
+        delete instantJSON['pdfId'];
+    }
     await db.pdfs.update(oid, {
-      instantJSON: await this.activeInstance.exportInstantJSON()
+      instantJSON
     });
+  }
+
+  getCurrentUri() {
+    const tab = this.getCurrentTab();
+
+    return tab ? tab.uri : null;
   }
 
   getCurrentTab() {
@@ -187,6 +279,33 @@ class TabService {
 
   linkToCurrentPage() {
     this.insertLinkToEditor(this.getLinkFor({ tab: this.getCurrentTab(), page: this.getCurrentPage() }));
+  }
+
+  async setInstantJSON(instantJson) {
+    console.log('[sync instant json] received', instantJson);
+    if (!instantJson) return;
+
+    // export current instant json
+    const currentInstantJson = await this.activeInstance.exportInstantJSON();
+
+    const delta = {
+      format: currentInstantJson.format,
+      annotations: (instantJson.annotations || []).filter(ann => !(currentInstantJson.annotations || []).some(cur => cur.id === ann.id))
+    };
+
+    if (delta.annotations.length === 0) {
+        console.log('[sync instant json] no change, ignore.');
+        return;
+    }
+
+    console.log('[sync instant json] delta', delta);
+
+    this.activeInstance.applyOperations([
+      {
+        type: "applyInstantJson",
+        instantJson: delta
+      }
+    ]);
   }
 
   async reloadPDF() {
@@ -323,6 +442,12 @@ async function indexPDFs(tabService) {
     return indexer;
 }
 
+async function getAllInstantJson() {
+  return Object.fromEntries(
+    (await db.pdfs.toArray()).map(({instantJSON, oid}) => [oid, instantJSON])
+  );
+}
+
 @Component({
   selector: 'my-app',
   templateUrl: './app.component.html',
@@ -335,6 +460,7 @@ export class AppComponent {
   searchResults = [];
   indexer = null;
   tabService = new TabService();
+  instantJson$ = liveQuery(() => getAllInstantJson());
   tinymceOptions = {
     height: 500,
     menubar: false,
@@ -360,6 +486,16 @@ export class AppComponent {
     console.log('performSearch')
     //console.log(this.indexer.search(evt.target.value));
   };
+
+  ngOnInit() {
+    this.instantJson$.subscribe({
+      next: instantJsons => {
+        const instantJson = instantJsons[this.tabService.getCurrentUri()];
+        this.tabService.setInstantJSON(instantJson)
+      },
+      error: error => console.error(error)
+    });
+  }
 
   ngAfterViewInit() {
     window.addEventListener('online', () => { this.connected = true; });
