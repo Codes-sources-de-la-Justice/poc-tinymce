@@ -48,7 +48,7 @@ const dbVersions = [
   {
     version: 1,
     stores: {
-      pdfs: "$$oid,&filename,title,instantJSON,blob",
+      pdfs: "$$oid,filename,title,instantJSON,blob",
       texts: "$$oid,pdfOid,text,page,*boundingBox"
     }
   }
@@ -323,11 +323,7 @@ class TabService {
   }
 }
 
-async function indexPDFs(tabService) {
-    const pdfs = await db.pdfs.toArray();
-
-    // Do not re-extract if we already have every IDs we want.
-    console.log('indexing PDFs...')
+async function loadDocuments(pdfs) {
     const allIndexed: IText[][] = await Promise.all(pdfs.map(({oid}) => db.texts.where({pdfOid: oid}).toArray()));
     const indexedOids = new Set(allIndexed.filter(indexed => indexed.length > 0).map(indexed => indexed[0].pdfOid));
     const documents = allIndexed.filter(indexed => indexed.length > 0).flatMap(pages => {
@@ -341,6 +337,15 @@ async function indexPDFs(tabService) {
         boundingBox
       }));
     });
+    return { indexedOids, documents }
+}
+
+async function indexPDFs(tabService) {
+    const pdfs = await db.pdfs.toArray();
+    const { indexedOids, documents } = await loadDocuments(pdfs);
+
+    // Do not re-extract if we already have every IDs we want.
+    console.log('indexing PDFs...')
 
     console.log('initializing with', documents.length, 'in database');
     console.time('Extracting text for the remaining PDFs');
@@ -388,6 +393,10 @@ async function indexPDFs(tabService) {
     );
     console.timeEnd('Bulk-putting the documents in the DB')
 
+    console.time('Fetching back the documents in the DB')
+    const finalDocuments = await db.texts.toArray();
+    console.timeEnd('Fetching back the documents in the DB')
+
     console.time('Building the indexer...');
     const indexer = lunr(function () {
       this.ref('oid');
@@ -395,7 +404,7 @@ async function indexPDFs(tabService) {
       this.field('text');
       this.metadataWhitelist = ['position'];
 
-      documents.forEach(function (doc) {
+      finalDocuments.forEach(function (doc) {
         this.add(doc);
       }, this);
     });
@@ -479,7 +488,7 @@ export class AppComponent {
     await this.tabService.activeInstance.create([annotation]);*/
   }
 
-  ngAfterViewInit() {
+  ngOnInit() {
     window.addEventListener('online', () => { this.connected = true; db.connect(SYNC_URL); });
     window.addEventListener('offline', () => { this.connected = false; });
 
