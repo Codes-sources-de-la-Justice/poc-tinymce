@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1649163718350,
+  "timestamp": 1656508521847,
   "index": "/index.html",
   "assetGroups": [
     {
@@ -95,7 +95,7 @@
         "/assets/pspdfkit-lib/windows-ba2e2d3f7c5061a9.css",
         "/assets/styles.css",
         "/index.html",
-        "/main.d73f58df93578f2b.js",
+        "/main.852be14db1959db0.js",
         "/manifest.webmanifest",
         "/polyfills.35a1c34dc617193c.js",
         "/runtime.233eba379154c253.js",
@@ -421,8 +421,8 @@
     "/assets/pspdfkit-lib/windows-ba2e2d3f7c5061a9.css": "8c7e8dd8e26d4a49701b3d9edcaebb08c4aad928",
     "/assets/sample.pdf": "be75995fb0de7529ee5049696dfb519434385ab7",
     "/assets/styles.css": "d7aa83b918b708b926f8d584e3c28ae8115c1057",
-    "/index.html": "0f60d9d1a62435d17584034774a9478ee5ce236c",
-    "/main.d73f58df93578f2b.js": "94bb1fd4b889cf85581df1909317c4b7b531b70b",
+    "/index.html": "85262ad174ae2613bfe1d41966f25c10e26fe397",
+    "/main.852be14db1959db0.js": "7feb169c2a02a94b66afdae56d6fc0421acd3aa4",
     "/manifest.webmanifest": "d82d4da578b1d92f2bd15f94e4265adae347eb57",
     "/polyfills.35a1c34dc617193c.js": "5ac22210d975e13abe1d0ded105262cca1250dd5",
     "/runtime.233eba379154c253.js": "cb5d79a907360e0da16558b15d0f7492c0d026a4",
